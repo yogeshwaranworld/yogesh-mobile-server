@@ -1,0 +1,186 @@
+<!DOCTYPE html> 
+
+<html>
+<head>
+    <title>control plane</title>
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js" integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js" integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+</head> 
+<body>
+    <style>
+        h2 {
+            font-size: 45px !important
+        }
+
+        .hostDisplay {
+            margin: 0.2em 0.5em !important;
+            display: inline-block !important;
+        }
+       
+    </style>
+
+    <div id="controlplane">
+        <h1>Yoges-mobile-filesytem</h1>               
+    </div>
+    
+    <hr>
+    <h2> File System </h2>
+    <div id="filesystem"></div>
+    
+    <script>
+
+        // should fail if response data is not a filesystem (text/html) and redirect user to the default browser handler
+        function renderFileSystem(path) {
+            fetch(path + "?type=files") 
+            .then(data => { 
+                const contentType = data.headers.get("content-type")
+                if (!contentType || contentType.indexOf("text/html") === -1) {
+                    window.location.href = path + "?type=files";  
+                    throw new Error("content type not html");
+                } else {
+                    return data.text()
+                }
+            }) 
+            .then(html => { 
+                if (!html.includes("<ul id=\"files\">")) {
+                    window.location.href = path + "?type=files"; 
+                    throw new Error("content type not a file system");
+                } else {
+                    $("#filesystem").html(html)
+                }
+            }) 
+            .catch(err => { console.log(err) })
+        }
+    
+        // get data first 
+        // render data as a list of configurable cells in a table format
+        // Text <ip address>, Input <meta data>, Text <created at> 
+    
+
+        // render control plane 
+        renderFileSystem(window.location.href)    
+    
+
+        function generateWebsiteDiv(id, ipAddress, metadata, creationData) {
+            return ("<tr>" +
+                `<td style="width: 75%"><input style="width: 250px" id="metadata${id}" type="text" value=${metadata}></td>` +
+                `<td style="width: 50%"><p class="hostDisplay" style="width: 25%"></p><b>ip: </b><a id="ip${id}" href="http://${ipAddress}">${ipAddress}</a></td>` +
+                `<td style="width: 50%"><p class="hostDisplay" style="width: 400px"><b>date created: </b><span id="date${id}">${creationData}</span></p></td>` +
+                "</tr>");
+        }
+
+        function drawFilterListTable(hosts) {
+            // generating table
+            let table = '<table class="hover shadow styled">';
+            let cur_id = 0;
+            // appending row for each addiitonal blocked site
+            hosts.forEach((host) => {
+                table += generateWebsiteDiv(cur_id, host.ip, host.metadata, host.creationDate);
+                cur_id++;
+            });
+            table += "</table>";
+            // adds table to html
+            const hostList = document.getElementById("hostList");
+            if (hostList != null) {
+                hostList.innerHTML = table;
+            }
+        }
+
+        function getLatestId(table) {
+            // reverse table string
+           const arrayStrings = table.split("");
+           const reverseArray = arrayStrings.reverse();
+           const joinArray = reverseArray.join("");
+           // "atadatem" is the reverse of "metadata"
+           let index = joinArray.indexOf("atadatem")
+           // get the char just before "atadatem" to retrieve the latest index :)
+           let latestId = parseInt(joinArray[index - 1])
+           return latestId
+        }
+
+        function update() {
+            // get state of all inputs, updates every ip in current state with new state
+            let latestId = getLatestId(document.getElementById("hostList").innerHTML)
+            let ips = []
+            let nodes = []
+            for (let i = 0; i <= latestId; i++) {
+                let ip = document.getElementById("ip" + i).innerHTML
+                let metaData = $("#metadata" + i).val()
+                let creationData = document.getElementById("date" + i).innerHTML
+                ips.push(ip) 
+                nodes.push({
+                    "ip" : ip, 
+                    "metadata" : metaData, 
+                    "creationDate" : creationData
+                })
+            }
+
+            console.log("new nodes: " + JSON.stringify(nodes))
+
+            new Set(ips).forEach((ip) => {
+                fetch("http://" + ip + "/node/update", {
+                    method: 'POST', 
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    referrerPolicy: 'no-referrer', 
+                    body: JSON.stringify({ "nodes" : nodes }) 
+                })
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error("failed to update host (non 200 status): " + ip)
+                    }
+                    return response.text()
+                })
+                .then((data) => {
+                    if (data !== "success!") {
+                        throw new Error("failed to update host (misleading 200 status): " + ip)
+                    } 
+                    console.log("updated: " + ip)
+                })
+                .catch((err) => {
+                    alert(err)
+                })
+            })
+        }
+
+        document.getElementById("add").addEventListener("click", () => {
+           // verify ip, adds new host to list of hosts & cache data in browser, call update
+           let table = document.getElementById("hostList").innerHTML
+           let ipInput = $("#ipInput").val()
+           let metaDataInput = $("#metaDataInput").val()
+           fetch("http://" + ipInput + "/exist")
+           .then((response) => response.text()) 
+           .then((data) => {
+               if (data === "exists") {
+                    let latestId = getLatestId(table)           
+                    table = table.replace("</table>", "") 
+                    table += generateWebsiteDiv(latestId + 1, ipInput, metaDataInput, new Date())
+                    document.getElementById("hostList").innerHTML = table
+                    update()
+               } else {
+                   alert(ipInput + " is not a valid active host")
+               }
+           })
+           .catch((err) => {
+               alert("problem while validating " + ipInput + ", " + err)
+           })
+        })
+
+     
+        document.getElementById("update").addEventListener("click", update)
+
+        // fetch list of valid hosts from local server
+        
+        fetch("/node/data")
+        .then((response) => response.json())
+        .then((data) => drawFilterListTable(JSON.parse(data).nodes)) 
+        .catch((err) => alert("failed GET /node/data: " + err)) 
+        /*
+        */
+        
+    </script>
+</body> 
+</html> 
